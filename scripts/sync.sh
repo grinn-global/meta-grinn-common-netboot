@@ -27,7 +27,7 @@ fi
 SYNAIMG=$(find ${YOCTO_DIR} -maxdepth 1 -name "SYNAIMG" -type d | head -n 1)
 KERNEL=$(find ${YOCTO_DIR} -maxdepth 1 -name "Image" -type l | head -n 1)
 DTB=$(find ${YOCTO_DIR} -maxdepth 1 -name "*.dtb" -type l | head -n 1)
-ROOTFS=$(find ${YOCTO_DIR} -maxdepth 1 -name "*rootfs.tar.xz" -type l | head -n 1)
+ROOTFS=$(find ${YOCTO_DIR} -maxdepth 1 -name "*rootfs.tar.zst" -type l | head -n 1)
 
 if [ -z "${SYNAIMG}" ] || [ ! -d "${SYNAIMG}" ]; then
     echo "Error: SYNAIMG not found"
