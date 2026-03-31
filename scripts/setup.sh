@@ -11,11 +11,11 @@ export TFTP_IMAGE_PATH=${NETBOOT_USR}/"SYNAIMG"
 # ------
 
 if [ ! -d "${TFTP_PATH}/${NETBOOT_USR}" ]; then
-    echo "${TFTP_PATH}/${NETBOOT_USR} doesn't exsists! Creating directory.."
+    echo "${TFTP_PATH}/${NETBOOT_USR} doesn't exist! Creating directory.."
     sudo mkdir -p "${TFTP_PATH}/${NETBOOT_USR}"
 fi
 
 if [ ! -d ${NFS_ROOTFS_PATH} ]; then
-    echo "${NFS_ROOTFS_PATH} doesn't exsists! Creating directory.."
+    echo "${NFS_ROOTFS_PATH} doesn't exist! Creating directory.."
     sudo mkdir -p ${NFS_ROOTFS_PATH}
 fi
