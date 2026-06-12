@@ -1,0 +1,175 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_NAME=$(basename "$0")
+
+NETBOOT_DIR=""
+NETBOOT_TFTP_DIR=""
+NETBOOT_NFS_DIR=""
+SUBDIR=""
+TFTP_BASE_PATH="/srv/tftp"
+NFS_BASE_PATH="/srv/nfs"
+
+usage() {
+    cat <<EOF
+Usage:
+  ${SCRIPT_NAME} --netboot-dir=PATH --subdir=NAME [--tftp-path=PATH] [--nfs-path=PATH]
+  ${SCRIPT_NAME} --help
+
+Options:
+  --netboot-dir=PATH Yocto deploy/images/MACHINE/netboot directory. Required.
+  --subdir=NAME      Target subdirectory under TFTP and NFS base paths. Required.
+  --tftp-path=PATH   TFTP base path. Default: /srv/tftp
+  --nfs-path=PATH    NFS base path. Default: /srv/nfs
+  -h, --help         Show this help message and exit.
+EOF
+}
+
+error() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+
+require_command() {
+    local command_name=$1
+
+    if ! command -v "${command_name}" >/dev/null 2>&1; then
+        error "Required command not found: ${command_name}"
+    fi
+}
+
+monitor_transfer() {
+    local label=$1
+    local transfer_pid=$2
+    local s
+
+    while kill -0 "${transfer_pid}" >/dev/null 2>&1; do
+        for s in '⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏'; do
+            printf "\r%s %-4s" "${label}" "${s}"
+            sleep 0.1
+        done
+    done
+
+    wait "${transfer_pid}"
+    printf "\r%s done\n" "${label}"
+}
+
+find_rootfs() {
+    find "${NETBOOT_NFS_DIR}" -maxdepth 1 \( -type f -o -type l \) -name "*.tar*" | head -n 1
+}
+
+parse_args() {
+    if [ "$#" -eq 0 ]; then
+        usage >&2
+        error "Missing required arguments"
+    fi
+
+    for arg in "$@"; do
+        case "${arg}" in
+            --netboot-dir=*)
+                NETBOOT_DIR=${arg#*=}
+                ;;
+            --subdir=*)
+                SUBDIR=${arg#*=}
+                ;;
+            --tftp-path=*)
+                TFTP_BASE_PATH=${arg#*=}
+                ;;
+            --nfs-path=*)
+                NFS_BASE_PATH=${arg#*=}
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                usage >&2
+                error "Unknown argument: ${arg}"
+                ;;
+        esac
+    done
+}
+
+validate_inputs() {
+    require_command find
+    require_command realpath
+    require_command rsync
+    require_command sudo
+    require_command tar
+
+    [ -n "${NETBOOT_DIR}" ] || error "--netboot-dir is required"
+    [ -n "${SUBDIR}" ] || error "--subdir is required"
+    [ -n "${TFTP_BASE_PATH}" ] || error "--tftp-path cannot be empty"
+    [ -n "${NFS_BASE_PATH}" ] || error "--nfs-path cannot be empty"
+
+    NETBOOT_DIR=$(realpath "${NETBOOT_DIR}") || error "Netboot directory does not exist: ${NETBOOT_DIR}"
+    NETBOOT_TFTP_DIR="${NETBOOT_DIR}/tftp"
+    NETBOOT_NFS_DIR="${NETBOOT_DIR}/nfs"
+
+    [ -d "${NETBOOT_DIR}" ] || error "Netboot directory does not exist: ${NETBOOT_DIR}"
+    [ -r "${NETBOOT_DIR}" ] || error "Netboot directory is not readable: ${NETBOOT_DIR}"
+    [ -d "${NETBOOT_TFTP_DIR}" ] || error "Netboot TFTP directory does not exist: ${NETBOOT_TFTP_DIR}"
+    [ -r "${NETBOOT_TFTP_DIR}" ] || error "Netboot TFTP directory is not readable: ${NETBOOT_TFTP_DIR}"
+    [ -d "${NETBOOT_NFS_DIR}" ] || error "Netboot NFS directory does not exist: ${NETBOOT_NFS_DIR}"
+    [ -r "${NETBOOT_NFS_DIR}" ] || error "Netboot NFS directory is not readable: ${NETBOOT_NFS_DIR}"
+
+    if [[ "${SUBDIR}" == */* ]]; then
+        error "--subdir must be a single path component, got: ${SUBDIR}"
+    fi
+
+    if [ "${SUBDIR}" = "." ] || [ "${SUBDIR}" = ".." ]; then
+        error "--subdir cannot be '.' or '..'"
+    fi
+
+    TFTP_BASE_PATH=$(realpath -m "${TFTP_BASE_PATH}")
+    NFS_BASE_PATH=$(realpath -m "${NFS_BASE_PATH}")
+}
+
+copy_to_tftp() {
+    local target_path=$1
+    local transfer_pid
+
+    echo "Transferring to TFTP directory: ${target_path}"
+
+    sudo rm -rf "${target_path}"
+    sudo mkdir -p "${target_path}"
+
+    sudo rsync -a --delete "${NETBOOT_TFTP_DIR}/" "${target_path}/" &
+    transfer_pid=$!
+    monitor_transfer "TFTP" "${transfer_pid}"
+}
+
+extract_to_nfs() {
+    local target_path=$1
+    local rootfs=$2
+    local transfer_pid
+
+    echo "Transferring to NFS directory: ${target_path}"
+
+    sudo rm -rf "${target_path}"
+    sudo mkdir -p "${target_path}"
+
+    sudo tar -xpf "${rootfs}" -C "${target_path}" &
+    transfer_pid=$!
+    monitor_transfer "NFS" "${transfer_pid}"
+}
+
+main() {
+    local tftp_target_path
+    local nfs_target_path
+    local rootfs
+
+    parse_args "$@"
+    validate_inputs
+
+    tftp_target_path="${TFTP_BASE_PATH}/${SUBDIR}"
+    nfs_target_path="${NFS_BASE_PATH}/${SUBDIR}"
+
+    rootfs=$(find_rootfs)
+    [ -n "${rootfs}" ] || error "No rootfs tar archive found in ${NETBOOT_NFS_DIR}"
+
+    copy_to_tftp "${tftp_target_path}"
+    extract_to_nfs "${nfs_target_path}" "${rootfs}"
+}
+
+main "$@"
