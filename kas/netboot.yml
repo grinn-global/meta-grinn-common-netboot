@@ -1,0 +1,6 @@
+header:
+  version: 14
+
+env:
+  NETBOOT_SERVER_IP: ""
+  NETBOOT_SERVER_SUBDIR: ""
